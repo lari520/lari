@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>网页版自动抽帧工具</title>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.7/dist/ffmpeg.min.js"></script>
+    <style>
+        body { max-width: 800px; margin: 20px auto; padding: 20px; }
+        .container { border: 2px dashed #ccc; padding: 20px; text-align: center; }
+        #preview { max-width: 100%; margin: 20px 0; }
+        #progress { height: 20px; background: #eee; margin: 10px 0; }
+        #progressBar { width: 0%; height: 100%; background: #4CAF50; transition: width 0.3s; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>视频自动抽帧工具</h1>
+        <input type="file" id="videoInput" accept="video/*">
+        <div id="progress"><div id="progressBar"></div></div>
+        <video id="preview" controls></video>
+        <button onclick="processVideo()" id="processBtn" disabled>开始处理</button>
+        <a id="downloadLink" style="display:none;">下载结果</a>
+    </div>
+
+    <script>
+        const { createFFmpeg, fetchFile } = FFmpeg;
+        const ffmpeg = createFFmpeg({ log: true });
+        let inputVideo = null;
+
+        // 初始化FFmpeg
+        (async () => {
+            await ffmpeg.load();
+            document.getElementById('processBtn').disabled = false;
+        })();
+
+        // 文件选择处理
+        document.getElementById('videoInput').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            inputVideo = URL.createObjectURL(file);
+            document.getElementById('preview').src = inputVideo;
+        });
+
+        // 核心处理逻辑
+        async function processVideo() {
+            const btn = document.getElementById('processBtn');
+            btn.disabled = true;
+            updateProgress(0);
+
+            try {
+                // 读取视频文件
+                const data = await fetch(inputVideo);
+                const buffer = await data.arrayBuffer();
+                
+                // 写入FFmpeg虚拟文件系统
+                ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(new Blob([buffer])));
+
+                // 执行处理命令
+                await ffmpeg.run(
+                    '-i', 'input.mp4',
+                    '-t', '2',              // 只处理前2秒
+                    '-vf', 'select=not(mod(n\,20))',  // 抽帧逻辑：每20帧取前15帧
+                    '-vsync', 'vfr',        // 可变帧率
+                    'output.mp4'
+                );
+
+                // 读取结果
+                const output = ffmpeg.FS('readFile', 'output.mp4');
+                const blob = new Blob([output.buffer], { type: 'video/mp4' });
+                
+                // 显示下载链接
+                const link = document.getElementById('downloadLink');
+                link.href = URL.createObjectURL(blob);
+                link.download = `processed_${Date.now()}.mp4`;
+                link.style.display = 'block';
+                
+                updateProgress(100);
+            } catch (err) {
+                console.error(err);
+                alert('处理失败: ' + err.message);
+            }
+            btn.disabled = false;
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressBar').style.width = percent + '%';
+        }
+    </script>
+</body>
+</html>
